@@ -25,6 +25,41 @@ if not sender_email or not password:
 recipients = ["timhockswender@gmail.com", "chrishockswender@gmail.com"]
 
 # Locations with their latitude and longitude
+WMO_CODES = {
+    0: "Clear sky",
+    1: "Mainly clear",
+    2: "Partly cloudy",
+    3: "Overcast",
+    45: "Fog",
+    48: "Depositing rime fog",
+    51: "Light drizzle",
+    53: "Moderate drizzle",
+    55: "Dense drizzle",
+    56: "Light freezing drizzle",
+    57: "Dense freezing drizzle",
+    61: "Slight rain",
+    63: "Moderate rain",
+    65: "Heavy rain",
+    66: "Light freezing rain",
+    67: "Heavy freezing rain",
+    71: "Slight snow fall",
+    73: "Moderate snow fall",
+    75: "Heavy snow fall",
+    77: "Snow grains",
+    80: "Slight rain showers",
+    81: "Moderate rain showers",
+    82: "Violent rain showers",
+    85: "Slight snow showers",
+    86: "Heavy snow showers",
+    95: "Thunderstorm",
+    96: "Thunderstorm with slight hail",
+    99: "Thunderstorm with heavy hail",
+}
+
+def get_weather_description(wmo_code):
+    """Returns a human-readable description for a WMO weather code."""
+    return WMO_CODES.get(wmo_code, "Unknown weather code")
+
 locations = {
     "Naples, FL": {"latitude": 26.1420, "longitude": -81.7948},
     "Davidson, NC": {"latitude": 35.5024, "longitude": -80.8437}
@@ -39,14 +74,14 @@ def get_weather(lat, lon):
         lon: The longitude of the location.
 
     Returns:
-        A string containing the weather forecast, or an error message if the
+        A dictionary containing the weather forecast, or None if the
         request fails.
     """
     base_url = API_BASE_URL
     params = {
         "latitude": lat,
         "longitude": lon,
-        "daily": "temperature_2m_max,temperature_2m_min,weathercode",
+        "daily": "temperature_2m_max,temperature_2m_min,weathercode,precipitation_sum,precipitation_probability_max",
         "current_weather": True,
         "temperature_unit": "fahrenheit",
         "timezone": "America/New_York"
@@ -57,13 +92,18 @@ def get_weather(lat, lon):
         data = response.json()
 
         # Extract today's forecast
-        current_temp = data["current_weather"]["temperature"]
-        max_temp = data["daily"]["temperature_2m_max"][0]
-        min_temp = data["daily"]["temperature_2m_min"][0]
-
-        return f"Current Temp: {current_temp}°F | High: {max_temp}°F | Low: {min_temp}°F"
+        weather_data = {
+            "current_temp": data["current_weather"]["temperature"],
+            "max_temp": data["daily"]["temperature_2m_max"][0],
+            "min_temp": data["daily"]["temperature_2m_min"][0],
+            "weather_code": data["daily"]["weathercode"][0],
+            "precipitation_sum": data["daily"]["precipitation_sum"][0],
+            "precipitation_probability_max": data["daily"]["precipitation_probability_max"][0]
+        }
+        return weather_data
     except requests.exceptions.RequestException as e:
-        return f"Could not retrieve weather: {e}"
+        print(f"Could not retrieve weather: {e}")
+        return None
 
 # --- Email and Weather Functions ---
 def build_weather_report(locations):
@@ -78,8 +118,20 @@ def build_weather_report(locations):
     """
     report = EMAIL_GREETING
     for location, coords in locations.items():
-        forecast = get_weather(coords["latitude"], coords["longitude"])
-        report += f"{location}: {forecast}\n"
+        weather_data = get_weather(coords["latitude"], coords["longitude"])
+        if weather_data:
+            report += f"{location}:\n"
+            report += f"  Current Temp: {weather_data['current_temp']}°F\n"
+            report += f"  High: {weather_data['max_temp']}°F | Low: {weather_data['min_temp']}°F\n"
+
+            precipitation_prob = weather_data['precipitation_probability_max']
+            if precipitation_prob > 0:
+                weather_desc = get_weather_description(weather_data['weather_code'])
+                report += f"  Precipitation: {weather_desc} ({precipitation_prob}% chance)\n"
+                report += f"  Total Precipitation: {weather_data['precipitation_sum']}mm\n"
+            report += "\n"
+        else:
+            report += f"{location}: Could not retrieve weather data.\n\n"
     return report
 
 def send_email(email_body):
